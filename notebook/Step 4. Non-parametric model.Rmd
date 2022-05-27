@@ -22,7 +22,7 @@ load('../data/train_test_data.Rdata')
 注：本来tree models可以直接分类factor类型的数据，但为了保持统一，选择在dummy_data上训练
 随机森林设置选取的feature数为预测变量数目平方根
 ```{r}
-mtry <- sqrt(ncol(trainData)-1)
+mtry <- sqrt(ncol(trainDataSmote)-1)
 tunegrid <- expand.grid(mtry=mtry, splitrule="gini", min.node.size=10)
 model_rf <- train(HeartDisease ~ ., data = trainDataSmote,
                   method = 'ranger',  metric = "ROC",

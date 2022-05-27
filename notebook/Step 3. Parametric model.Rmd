@@ -13,6 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(caret)
 library(ggplot2)
+library(dplyr)
 library(smotefamily)
 set.seed(123)
 ```
