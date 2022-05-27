@@ -1,0 +1,106 @@
+---
+title: "Step 5. Performance evaluation"
+author: "Yumeng Zhang"
+date: "5/27/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(pROC)
+library(dplyr)
+library(purrr)
+library(caret)
+library(ggplot2)
+```
+
+```{r}
+load('../data/train_test_data.Rdata')
+load('../models/linear.models.Rdata')
+load('../models/tree.models.Rdata')
+```
+
+测试集上预测概率，用于计算ROC和AUC
+```{r}
+testProbs_glm <- predict(model_glm_smote, newdata = testData, type = "prob")
+testProbs_lda <- predict(model_lda, newdata = testData, type = "prob")
+testProbs_rf <- predict(model_rf, newdata = testData, type = "prob")
+testProbs_gbm <- predict(model_gbm, newdata = testData, type = "prob")
+
+rocobj1 <- roc(testData$HeartDisease, testProbs_glm$Yes)
+auc1 <- round(auc(testData$HeartDisease, testProbs_glm$Yes),4)
+rocobj2 <- roc(testData$HeartDisease, testProbs_lda$Yes)
+auc2 <- round(auc(testData$HeartDisease, testProbs_lda$Yes),4)
+rocobj3 <- roc(testData$HeartDisease, testProbs_rf$Yes)
+auc3 <- round(auc(testData$HeartDisease, testProbs_rf$Yes),4)
+rocobj4 <- roc(testData$HeartDisease, testProbs_gbm$Yes)
+auc4 <- round(auc(testData$HeartDisease, testProbs_gbm$Yes),4)
+```
+
+ROC曲线
+```{r}
+roc.list <- list(GLM=rocobj1, LDA=rocobj2, RF=rocobj3, GBM=rocobj4)
+roc.list %>% 
+  map(~tibble(AUC = .x$auc)) %>% 
+  bind_rows(.id = "name") -> data.auc
+data.auc %>% 
+  mutate(label_long=paste0(name,", AUC = ",paste(round(AUC,3))),
+         label_AUC=paste0("AUC = ",paste(round(AUC,3)))) -> data.labels
+```
+
+```{r fig.height=6, fig.width=8}
+ggroc(roc.list, legacy.axes = T) +
+  facet_wrap(~name) +
+  geom_text(data = data.labels,
+            aes(0.5, 1, label = paste(label_AUC)),
+            hjust = 1.5, vjust=1) +
+  labs(color = "model") +
+  geom_abline(slope = 1, intercept = 0, linetype=2) +
+  labs(title = 'ROC curves for models on the test set') +
+  theme_bw()
+```
+
+
+测试集上的表现评估
+```{r}
+getMetrics <- function(cm, modelName) {
+  df1 <- as.data.frame(cm$overall)
+  acc <- df1['Accuracy',]
+  df2 <- as.data.frame(cm$byClass)
+  sen <- df2['Sensitivity',]
+  spe <- df2['Specificity',]
+  pre <- df2['Precision',]
+  f1 <- df2['F1', ]
+  return(data.frame(metric=c('Accuracy', 'Sensitivity', 'Specificity', 'Precision', 'F1'),
+                    value=c(acc, sen, spe, pre, f1), model=modelName))
+}
+```
+
+```{r}
+cm_glm <- confusionMatrix(predict(model_glm_smote, newdata = testData), testData$HeartDisease, positive = 'Yes')
+metric_glm <- getMetrics(cm_glm, modelName="GLM")
+cm_lda <- confusionMatrix(predict(model_lda, newdata = testData), testData$HeartDisease, positive = 'Yes')
+metric_lda <- getMetrics(cm_lda, modelName="LDA")
+cm_rf <- confusionMatrix(predict(model_rf, newdata = testData), testData$HeartDisease, positive = 'Yes')
+metric_rf <- getMetrics(cm_rf, modelName="RF")
+cm_gbm <- confusionMatrix(predict(model_gbm, newdata = testData), testData$HeartDisease, positive = 'Yes')
+metric_gbm <- getMetrics(cm_gbm, modelName="GBM")
+```
+
+模型不同评估指标的Bar plot.
+```{r}
+metrics <- rbind(metric_glm, metric_lda, metric_rf, metric_gbm)
+metrics$metric <- factor(metrics$metric, levels=c('Accuracy', 'Sensitivity', 'Specificity', 'Precision', 'F1'))
+metrics$model <- factor(metrics$model, levels = c('GLM', 'LDA', 'RF', 'GBM'))
+```
+
+```{r fig.height=6, fig.width=8}
+ggplot(metrics, aes(x=metric, y=value, fill=model)) +
+  geom_bar(stat="identity", position=position_dodge(), width=0.7) +
+  labs(y='', x='Classification Metrics', col='Model') +
+  theme_bw() 
+```
+

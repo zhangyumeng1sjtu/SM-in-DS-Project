@@ -1,0 +1,56 @@
+---
+title: "Step 1. Preprocessing"
+author: "Yumeng Zhang"
+date: "5/27/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(dplyr)
+library(fastDummies)
+```
+
+```{r}
+rawdata <- as_tibble(read.csv('../data/heart_2020_cleaned.csv', stringsAsFactors = T))
+```
+
+将年龄和GenHealth转换为有序变量
+```{r}
+ages <- data.frame(AgeCategory=levels(rawdata$AgeCategory),
+                   AgeGroup=c(0,1,2,3,4,5,6,7,8,9,10,11,12))
+case_genhealth <- function(health) {
+  case_when(
+    health == 'Poor' ~ 0,
+    health == 'Fair' ~ 1,
+    health == 'Good' ~ 2,
+    health == 'Very good' ~ 3,
+    health == 'Excellent' ~ 4
+  )
+}
+data <- rawdata %>%
+  merge(ages, by="AgeCategory") %>%
+  select(!AgeCategory) %>% 
+  mutate(GenHealth = case_genhealth(GenHealth)) %>%
+  as_tibble()
+```
+
+将其它分类变量转换为dummy variable.
+```{r}
+dummy_data <- data %>%
+  dummy_cols(select_columns=c('Smoking', 'AlcoholDrinking', 'Stroke',
+                              'DiffWalking', 'Sex','Race','Diabetic',
+                              'PhysicalActivity', 'Asthma',
+                              'KidneyDisease', 'SkinCancer'), 
+             remove_most_frequent_dummy=T, remove_selected_columns=T) %>%
+  as_tibble()
+```
+
+```{r}
+save(rawdata, data, dummy_data, file='../data/data.Rdata')
+```
+

@@ -1,0 +1,137 @@
+---
+title: "Step 2. EDA"
+author: "Yumeng Zhang"
+date: "5/27/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ggplot2)
+library(ggpubr)
+library(ggstatsplot)
+library(ggcorrplot)
+library(patchwork)
+```
+
+```{r}
+load('../data/data.Rdata')
+```
+
+画患病和非患病两组人群BMI, PhysicalHealth, MentalHealth, SleepTime的分布及其差异
+```{r}
+p1 <- ggboxplot(rawdata, x= "HeartDisease", y = "BMI", color = "HeartDisease") +
+  stat_compare_means(comparison = list(c('Yes', 'No')), label = "p.signif") +
+  scale_colour_discrete(breaks=c('Yes', 'No'))
+p2 <- ggboxplot(rawdata, x= "HeartDisease", y = "PhysicalHealth", color = "HeartDisease") +
+  stat_compare_means(comparison = list(c('Yes', 'No')), label = "p.signif") +
+  scale_colour_discrete(breaks=c('Yes', 'No'))
+p3 <- ggboxplot(rawdata, x= "HeartDisease", y = "MentalHealth", color = "HeartDisease") +
+  stat_compare_means(comparison = list(c('Yes', 'No')), label = "p.signif") +
+  scale_colour_discrete(breaks=c('Yes', 'No'))
+p4 <- ggboxplot(rawdata, x= "HeartDisease", y = "SleepTime", color = "HeartDisease") +
+  stat_compare_means(comparison = list(c('Yes', 'No')), label = "p.signif") +
+  scale_colour_discrete(breaks=c('Yes', 'No'))
+```
+
+```{r fig.height=4, fig.width=8}
+p1 + p2 + p3 + p4 + plot_layout(nrow = 1, byrow = T, guides='collect') & theme(legend.position='top')
+```
+
+画患病和非患病两组人群Smoking, AlcoholDrinking等分类变量的分布及其差异
+```{r}
+pie1 <- ggpiestats(
+  data = rawdata, x = HeartDisease, y = Smoking,
+  bf.message = F, results.subtitle = F, palette = "Set2", caption = "Smoking"
+)
+pie2 <- ggpiestats(
+  data = rawdata, x = HeartDisease, y = AlcoholDrinking,
+  bf.message = F, results.subtitle = F, palette = "Set2", caption = "AlcoholDrinking"
+)
+pie3 <- ggpiestats(
+  data = rawdata, x = HeartDisease, y = Stroke,
+  bf.message = F, results.subtitle = F, palette = "Set2", caption = "Stroke"
+)
+pie4 <- ggpiestats(
+  data = rawdata, x = HeartDisease, y = DiffWalking,
+  bf.message = F, results.subtitle = F, palette = "Set2", caption = "DiffWalking"
+)
+pie5 <- ggpiestats(
+  data = rawdata, x = HeartDisease, y = Sex,
+  bf.message = F, results.subtitle = F, palette = "Set2", caption = "Sex"
+)
+pie6 <- ggpiestats(
+  data = rawdata, x = HeartDisease, y = PhysicalActivity,
+  bf.message = F, results.subtitle = F, palette = "Set2", caption = "PhysicalActivity"
+)
+pie7 <- ggpiestats(
+  data = rawdata, x = HeartDisease, y = Asthma,
+  bf.message = F, results.subtitle = F, palette = "Set2", caption = "Asthma"
+)
+pie8 <- ggpiestats(
+  data = rawdata, x = HeartDisease, y = KidneyDisease,
+  bf.message = F, results.subtitle = F, palette = "Set2", caption = "KidneyDisease"
+)
+pie9 <- ggpiestats(
+  data = rawdata, x = HeartDisease, y = SkinCancer,
+  bf.message = F, results.subtitle = F, palette = "Set2", caption = "SkinCancer"
+)
+```
+
+```{r fig.height=6, fig.width=8}
+(pie1 | pie2 | pie3)/ (pie4 | pie5 | pie6)  / (pie7 | pie8 | pie9 ) + plot_layout(guides='collect') & theme(legend.position='top')
+```
+
+```{r}
+bar1 <- ggbarstats(data = rawdata, x = HeartDisease, y = Race,
+                   bf.message = F, results.subtitle = F, palette = "Set2")
+bar2 <- ggbarstats(data = rawdata, x = HeartDisease, y = GenHealth,
+                   bf.message = F, results.subtitle = F, palette = "Set2")
+bar3 <- ggbarstats(data = rawdata, x = HeartDisease, y = Diabetic,
+                   bf.message = F, results.subtitle = F, palette = "Set2")
+bar4 <- ggbarstats(data = rawdata, x = HeartDisease, y = AgeCategory,
+                   bf.message = F, results.subtitle = F, palette = "Set2")
+```
+
+```{r fig.height=8, fig.width=12}
+(bar2 | bar3) / bar1 / bar4 + plot_layout(guides='collect') & theme(legend.position='top')
+```
+
+画各变量（转换为dummy variable后）之间的相关系数
+```{r fig.height=10, fig.width=10}
+ggcorrmat(
+  data = dummy_data[c(-1, -13, -14, -15, -16, -17, -18, -19, -20)],
+  ggcorrplot.args = list(
+    lab_size = 4
+  )
+)
+```
+
+画所有预测变量和HeartDisease之间的相关系数
+```{r fig.height=8, fig.width=6}
+corr_y <- as.data.frame(cor(dummy_data[-1], as.numeric(dummy_data$HeartDisease)))
+corr_y <- cbind(Predictor = rownames(corr_y), corr_y)
+rownames(corr_y) <- 1:nrow(corr_y)
+colnames(corr_y)[2] <- "Corr"
+corr_y$Relation <- as.factor(ifelse(corr_y$Corr > 0, "Positive", "Negative"))
+
+ggdotchart(corr_y, x = "Predictor", y = "Corr",
+           color = "Relation",                               
+           sorting = "descending", 
+           rotate = TRUE,
+           add = "segments",                             
+           add.params = list(color = "lightgray", size = 1), 
+           group = "Relation",                               
+           dot.size = 8,                              
+           label = round(corr_y$Corr, 2),                       
+           font.label = list(color = "white", size = 8, vjust = 0.5),
+           ggtheme = theme_classic()) +
+          theme(legend.position = "none") +
+          xlab("") +
+          ylab("Correlation Coefficient") +
+          geom_hline(yintercept = 0, linetype = 2, color = "lightgray")
+```
+

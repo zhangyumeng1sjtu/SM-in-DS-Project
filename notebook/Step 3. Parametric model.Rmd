@@ -1,0 +1,151 @@
+---
+title: "Step 3. Parametric model"
+author: "Yumeng Zhang"
+date: "5/27/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(caret)
+library(ggplot2)
+library(smotefamily)
+set.seed(123)
+```
+
+```{r}
+load('../data/data.Rdata')
+```
+
+划分训练/测试集
+```{r}
+trainIndex <- createDataPartition(dummy_data$HeartDisease, p=0.8, list=F)
+trainData <- dummy_data[trainIndex,]
+testData <- dummy_data[-trainIndex,]
+```
+
+自定义Metric评估函数
+```{r}
+customTwoClassSummary <- function(data, lev = NULL, model = NULL, positive = NULL, negative=NULL) 
+{
+  lvls <- levels(data$obs)
+  if (length(lvls) > 2) 
+    stop(paste("Your outcome has", length(lvls), "levels. The twoClassSummary() function isn't appropriate."))
+  caret:::requireNamespaceQuietStop("ModelMetrics")
+  if (!all(levels(data[, "pred"]) == lvls)) 
+    stop("levels of observed and predicted data do not match")
+  rocAUC <- ModelMetrics::auc(ifelse(data$obs == lev[2], 0, 
+                                     1), data[, lvls[1]])
+  out <- c(rocAUC, 
+           # Only change happens here!
+           sensitivity(data[, "pred"], data[, "obs"], positive=positive), 
+           specificity(data[, "pred"], data[, "obs"], negative=negative))
+  names(out) <- c("ROC", "Sens", "Spec")
+  out
+}
+```
+
+设置用10-Fold交叉验证训练
+```{r}
+ctrl <- trainControl(method = 'cv',
+                     number = 10,
+                     classProbs = T,
+                     summaryFunction = function(...) customTwoClassSummary(..., positive="Yes", negative="No"))
+```
+
+由于数据集政正负类别不平衡，考虑采用上采样和SMOTE的方法
+```{r}
+trainDataUp <- upSample(x = trainData[, -1],
+                        y = trainData$HeartDisease)
+trainDataUp <- rename(trainDataUp, HeartDisease = Class)
+
+trainDataSmote <- SMOTE(trainData[,-1], trainData[,1])$data
+trainDataSmote <- rename(trainDataSmote, HeartDisease = class)
+```
+
+训练GLM模型
+```{r}
+model_glm <- train(HeartDisease ~ ., data = trainData, method = "glm",
+                   family = "binomial", metric = "ROC", trControl = ctrl)
+model_glm_up <- train(HeartDisease ~ ., data = trainDataUp, method = "glm",
+                      family = "binomial", metric = "ROC",  trControl = ctrl)
+model_glm_smote <- train(HeartDisease ~ ., data = trainDataSmote, method = "glm",
+                         family = "binomial", metric = "ROC", trControl = ctrl)
+```
+
+交叉验证的结果（过采样能平衡敏感度和特异度，故之后模型在SMOTE上采样后的数据上训练）
+```{r}
+results <- bind_rows(model_glm$results, model_glm_up$results, model_glm_smote$results)[,-1]
+results$Sampling = c('None', 'Upsample', 'SMOTE')
+results
+```
+
+我们训练过程未对数据归一化，可以计算预测变量的odds ratio来对模型进行解释
+```{r}
+odds.ratio <- exp(cbind(coef(model_glm_smote$finalModel), confint(model_glm_smote$finalModel)))
+odds.ratio <- as.data.frame(odds.ratio)
+odds.ratio <- cbind(Predictor = rownames(odds.ratio), odds.ratio)
+colnames(odds.ratio) <- c('Predictor', 'Odds', 'CILow', 'CIHigh')
+odds.ratio <- odds.ratio[-1,]
+rownames(odds.ratio) <- 1:nrow(odds.ratio)
+odds.ratio$Effect <- ifelse(odds.ratio$Odds > 1, "Positive", "Negative")
+```
+
+反映odds ratio的dot plot (注意AgeGroup和GenHealth的odds ratio的含义是相邻两组间患病odds的差异)
+```{r fig.height=8, fig.width=6}
+p <- ggplot(odds.ratio, aes(x = Odds, y = reorder(Predictor, Odds), label = round(Odds, 2), col = Effect)) 
+p + geom_vline(aes(xintercept = 1), size = .25, linetype = "dashed") +
+    geom_errorbarh(aes(xmax = CIHigh, xmin = CILow), size = .5, height = .2, color = "gray50") +
+    geom_point(size = 2.5) +
+    geom_text(vjust = -1, size=3) +
+    theme_bw() +
+    theme(panel.grid.minor = element_blank()) +
+    scale_y_discrete() +
+    scale_x_continuous(breaks = c(0.5, 1, 2, 3), labels = c(0.5, 1, 2, 3)) +
+    coord_trans(x = "log10") +
+    ylab("") +
+    xlab("Odds ratio (log scale)") +
+    theme(legend.position = "none")
+```
+
+可以用Lasso看看特征选择的结果
+```{r}
+tuneGrid <- expand.grid(alpha=1, lambda=10^seq(-4, -1, length.out=20))
+model_lasso <- train(HeartDisease ~ ., data = trainDataSmote,
+                     method = "glmnet", family = "binomial",
+                     metric = "ROC", tuneGrid = tuneGrid, trControl = ctrl)
+coef(model_lasso$finalModel, model_lasso$bestTune$lambda)
+ggplot(model_lasso) + theme_bw() + scale_x_continuous(trans = 'log10')
+```
+
+线性判别分析（标准化，为了通过LD value来看特征对Heart Disease的影响，可以和预测变量与Heart Disease相关性进行比较）
+```{r}
+model_lda <- train(HeartDisease ~ .,  data = trainDataSmote,
+                   method = "lda", metric = "ROC",
+                   preProcess = c('center','scale'), trControl = ctrl)
+```
+
+```{r fig.height=8, fig.width=6}
+df <- as.data.frame(model_lda$finalModel$scaling)
+df <- cbind(Predictor = rownames(df), df)
+rownames(df) <- 1:nrow(df)
+df$Effect <- ifelse(df$LD1 > 0, "Positive", "Negative")
+p <- ggplot(df, aes(x = LD1, y = reorder(Predictor, LD1), label = round(LD1, 2), col = Effect)) 
+p + geom_vline(aes(xintercept = 0), size = .25, linetype = "dashed") +
+  geom_point(size = 2.5) +
+  geom_text(vjust = -1, size=3) +
+  theme_bw() +
+  theme(panel.grid.minor = element_blank()) +
+  labs(y='', x='LD1', title = 'The LD value for each predictor') +
+  theme(legend.position = "none")
+```
+
+```{r}
+save(trainDataSmote, testData, customTwoClassSummary, ctrl, file='../data/train_test_data.Rdata')
+save(model_glm_smote, model_lda, file='../models/linear.models.Rdata')
+```
+
